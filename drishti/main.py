@@ -11,6 +11,7 @@ import shutil
 import datetime
 import argparse
 import subprocess
+import matplotlib.pyplot as plt
 
 import pandas as pd
 
@@ -498,7 +499,7 @@ def main():
             total_size_stdio / total_size * 100.0,
             convert_bytes(total_size_stdio)
         )
-
+       
         recommendation = [
             {
                 'message': 'Consider switching to a high-performance I/O interface such as MPI-IO'
@@ -514,7 +515,7 @@ def main():
 
         recommendation = [
             {
-                'message': 'Consider switching to a high-performance I/O interface such as MPI-IO'
+                'message' : 'Consider switching to a high-performance I/O interface such as MPI-IO'
             }
         ]
 
@@ -583,15 +584,8 @@ def main():
             )
 
         #########################################################################################################################################################################
-
+        
         # Get the number of small I/O operations (less than 1 MB)
-        total_reads_small = (
-            df['counters']['POSIX_SIZE_READ_0_100'].sum() +
-            df['counters']['POSIX_SIZE_READ_100_1K'].sum() +
-            df['counters']['POSIX_SIZE_READ_1K_10K'].sum() +
-            df['counters']['POSIX_SIZE_READ_10K_100K'].sum() +
-            df['counters']['POSIX_SIZE_READ_100K_1M'].sum()
-        )
 
         # Get the files responsible for more than half of these accesses
         files = []
@@ -611,13 +605,36 @@ def main():
             df['counters']['POSIX_SIZE_WRITE_10K_100K'] +
             df['counters']['POSIX_SIZE_WRITE_100K_1M']
         )
+        total_reads_small = (
+                df['counters']['POSIX_SIZE_READ_0_100'].sum() +
+                df['counters']['POSIX_SIZE_READ_100_1K'].sum() +
+                df['counters']['POSIX_SIZE_READ_1K_10K'].sum() +
+                df['counters']['POSIX_SIZE_READ_10K_100K'].sum() +
+                df['counters']['POSIX_SIZE_READ_100K_1M'].sum()
+            )
+
+        posix_size_read_0_100 = df['counters']['POSIX_SIZE_READ_0_100'].sum()
+        posix_size_read_100_1K = df['counters']['POSIX_SIZE_READ_100_1K'].sum()
+        posix_size_read_1K_10K = df['counters']['POSIX_SIZE_READ_1K_10K'].sum()
+        posix_size_read_10K_100K = df['counters']['POSIX_SIZE_READ_10K_100K'].sum()
+        posix_size_read_100K_1M = df['counters']['POSIX_SIZE_READ_100K_1M'].sum()
+        read_larger_than_1MB = total_reads - total_reads_small
+
+        data = [posix_size_read_0_100, posix_size_read_100_1K, posix_size_read_1K_10K, posix_size_read_10K_100K, posix_size_read_100K_1M, read_larger_than_1MB]  # Numeric data for each category
+        categories = ['0-100', '100-1K', '1K-10K', '100K-1M', '100K-1M', 'Everything else']  # Category labels
+
+        plt.pie(data, labels=categories, autopct='%1.1f%%')
+
+        plt.title('Small Read Size Intensive')
+
+        graph = plt.savefig('graph1.png')
 
         detected_files = pd.DataFrame(df['counters'].groupby('id')[['INSIGHTS_POSIX_SMALL_READ', 'INSIGHTS_POSIX_SMALL_WRITE']].sum()).reset_index()
         detected_files.columns = ['id', 'total_reads', 'total_writes']
         detected_files.loc[:, 'id'] = detected_files.loc[:, 'id'].astype(str)
 
         if total_reads_small and total_reads_small / total_reads > THRESHOLD_SMALL_REQUESTS and total_reads_small > THRESHOLD_SMALL_REQUESTS_ABSOLUTE:
-            issue = 'Application issues a high number ({}) of small read requests (i.e., < 1MB) which represents {:.2f}% of all read requests'.format(
+            issue = 'AppDIEEEEEElication issues a high number ({}) of small read requests (i.e., < 1MB) which represents {:.2f}% of all read requests'.format(
                 total_reads_small, total_reads_small / total_reads * 100.0
             )
 
@@ -638,7 +655,8 @@ def main():
 
             recommendation.append(
                 {
-                    'message': 'Consider buffering read operations into larger more contiguous ones'
+                    'message': 'Consider buffering read operations into larger more contiguous ones',
+                    'graph' : "graph1.png"
                 }
             )
 
@@ -646,28 +664,62 @@ def main():
                 recommendation.append(
                     {
                         'message': 'Since the appplication already uses MPI-IO, consider using collective I/O calls (e.g. MPI_File_read_all() or MPI_File_read_at_all()) to aggregate requests into larger ones',
-                        'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/mpi-io-collective-read.c'), line_numbers=True, background_color='default')
+                        'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/mpi-io-collective-read.c'), line_numbers=True, background_color='default'),
+                        'graph' : "graph1.png"
+
                     }
                 )
             else:
                 recommendation.append(
                     {
-                        'message': 'Application does not use MPI-IO for operations, consider use this interface instead to harness collective operations'
+                        'message': 'Application does not use MPI-IO for operations, consider use this interface instead to harness collective operations',
+                        'graph' : "graph1.png"
+
                     }
                 )
-
+            for rec in recommendation:
+                graph_path = rec.get('graph')
+                if graph_path:
+                    try:
+                        subprocess.run(['imgcat', graph_path])
+                    except FileNotFoundError:
+                        print(f"Warning: 'imgcat' command not found. Please install 'imgcat' to display the graphs in the terminal.")
+                    except Exception as e:
+                        print(f"Error displaying graph: {e}")
+                    
             insights_operation.append(
-                message(INSIGHTS_POSIX_HIGH_SMALL_WRITE_REQUESTS_USAGE, TARGET_DEVELOPER, HIGH, issue, recommendation, detail)
+                message(INSIGHTS_POSIX_HIGH_SMALL_WRITE_REQUESTS_USAGE, TARGET_DEVELOPER, HIGH, issue, recommendation, detail, graph)
             )
 
+
+            total_writes_small = (
+                    df['counters']['POSIX_SIZE_WRITE_0_100'].sum() +
+                    df['counters']['POSIX_SIZE_WRITE_100_1K'].sum() +
+                    df['counters']['POSIX_SIZE_WRITE_1K_10K'].sum() +
+                    df['counters']['POSIX_SIZE_WRITE_10K_100K'].sum() +
+                    df['counters']['POSIX_SIZE_WRITE_100K_1M'].sum()
+                )
+
+            posix_size_write_0_100 = df['counters']['POSIX_SIZE_WRITE_0_100'].sum()
+            posix_size_write_100_1K = df['counters']['POSIX_SIZE_WRITE_100_1K'].sum()
+            posix_size_write_1K_10K = df['counters']['POSIX_SIZE_WRITE_1K_10K'].sum()
+            posix_size_write_10K_100K = df['counters']['POSIX_SIZE_WRITE_10K_100K'].sum()
+            posix_size_write_100K_1M = df['counters']['POSIX_SIZE_WRITE_100K_1M'].sum()
+            write_larger_than_1MB = total_writes - total_writes_small
+
+            #Sample data
+            data = [posix_size_write_0_100, posix_size_write_100_1K, posix_size_write_1K_10K, posix_size_write_10K_100K, posix_size_write_100K_1M, write_larger_than_1MB]  # Numeric data for each category
+            categories = ['0-100', '100-1K', '1K-10K', '100K-1M', '100K-1M', 'Everything else']  # Category labels
+
+            # Create a pie chart
+            plt.pie(data, labels=categories, autopct='%1.1f%%')
+
+            # Add a title
+            plt.title('Small Read Size Intensive')
+
+            # Display the chart
+            plt.savefig('graph2.png')
         # Get the number of small I/O operations (less than the stripe size)
-        total_writes_small = (
-            df['counters']['POSIX_SIZE_WRITE_0_100'].sum() +
-            df['counters']['POSIX_SIZE_WRITE_100_1K'].sum() +
-            df['counters']['POSIX_SIZE_WRITE_1K_10K'].sum() +
-            df['counters']['POSIX_SIZE_WRITE_10K_100K'].sum() +
-            df['counters']['POSIX_SIZE_WRITE_100K_1M'].sum()
-        )
 
         if total_writes_small and total_writes_small / total_writes > THRESHOLD_SMALL_REQUESTS and total_writes_small > THRESHOLD_SMALL_REQUESTS_ABSOLUTE:
             issue = 'Application issues a high number ({}) of small write requests (i.e., < 1MB) which represents {:.2f}% of all write requests'.format(
@@ -691,7 +743,8 @@ def main():
 
             recommendation.append(
                 {
-                    'message': 'Consider buffering write operations into larger more contiguous ones'
+                    'message': 'Consider buffering write operations into larger more contiguous ones',
+                    'graph' : 'graph2.png'
                 }
             )
 
@@ -699,15 +752,23 @@ def main():
                 recommendation.append(
                     {
                         'message': 'Since the application already uses MPI-IO, consider using collective I/O calls (e.g. MPI_File_write_all() or MPI_File_write_at_all()) to aggregate requests into larger ones',
-                        'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/mpi-io-collective-write.c'), line_numbers=True, background_color='default')
+                        'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/mpi-io-collective-write.c'), line_numbers=True, background_color='default'),
+                        'graph' : 'graph2.png'
+
                     }
                 )
             else:
                 recommendation.append(
                     {
-                        'message': 'Application does not use MPI-IO for operations, consider use this interface instead to harness collective operations'
+                        'message': 'Application does not use MPI-IO for operations, consider use this interface instead to harness collective operations',
+                        'graph' : 'graph2.png'
+
                     }
                 )
+            for item in recommendation:
+                graph_path = item.get('graph')
+                if graph_path:
+                    subprocess.run(['xdg=open', graph_path])
 
             insights_operation.append(
                 message(INSIGHTS_POSIX_HIGH_SMALL_READ_REQUESTS_USAGE, TARGET_DEVELOPER, HIGH, issue, recommendation, detail)
@@ -717,6 +778,19 @@ def main():
 
         # How many requests are misaligned?
 
+        jobs = df['counters']['jobid'].tolist()
+        misaligned_requests = df['counters']['POSIX_FILE_NOT_ALIGNED'].tolist()
+        # Assuming you also have the misaligned_requests data (similar to the 'misaligned_requests' list in your example)
+
+        # Plot the misaligned POSIX file requests for different jobs
+        plt.figure(figsize=(10, 6))
+        plt.bar(jobs, misaligned_requests, color='b')
+        plt.xlabel('Jobs')
+        plt.ylabel('Misaligned POSIX File Requests')
+        plt.title('Misaligned POSIX File Requests for Different Jobs')
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        plt.savefig('graph3.png')
         total_mem_not_aligned = df['counters']['POSIX_MEM_NOT_ALIGNED'].sum()
         total_file_not_aligned = df['counters']['POSIX_FILE_NOT_ALIGNED'].sum()
 
@@ -736,7 +810,8 @@ def main():
 
             recommendation = [
                 {
-                    'message': 'Consider aligning the requests to the file system block boundaries'
+                    'message': 'Consider aligning the requests to the file system block boundaries',
+                    'graph' : 'graph3.png'
                 }
             ]
 
@@ -744,10 +819,14 @@ def main():
                 recommendation.append(
                     {
                         'message': 'Since the appplication uses HDF5, consider using H5Pset_alignment() in a file access property list',
-                        'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/hdf5-alignment.c'), line_numbers=True, background_color='default')
+                        'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/hdf5-alignment.c'), line_numbers=True, background_color='default'),
+                        'graph' : 'graph3.png'
+
                     },
                     {
-                        'message': 'Any file object greater than or equal in size to threshold bytes will be aligned on an address which is a multiple of alignment'
+                        'message': 'Any file object greater than or equal in size to threshold bytes will be aligned on an address which is a multiple of alignment',
+                        'graph' : 'graph3.png'
+
                     }
                 )
 
@@ -755,9 +834,15 @@ def main():
                 recommendation.append(
                     {
                         'message': 'Consider using a Lustre alignment that matches the file system stripe configuration',
-                        'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/lustre-striping.bash'), line_numbers=True, background_color='default')
+                        'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/lustre-striping.bash'), line_numbers=True, background_color='default'),
+                        'graph' : 'graph3.png'
+
                     }
                 )
+            for item in recommendation:
+                graph_path = item.get('graph')
+                if graph_path:
+                    subprocess.run(['xdg=open', graph_path])
 
             insights_metadata.append(
                 message(INSIGHTS_POSIX_HIGH_MISALIGNED_FILE_USAGE, TARGET_DEVELOPER, HIGH, issue, recommendation)
@@ -765,6 +850,49 @@ def main():
 
         #########################################################################################################################################################################
 
+        max_read_offset = df['counters']['POSIX_MAX_BYTE_READ'].tolist()
+        bytes_read = df['counters']['POSIX_BYTES_READ'].tolist()
+        max_write_offset = df['counters']['POSIX_MAX_BYTE_WRITE'].tolist()
+        bytes_written = bytes_read = df['counters']['POSIX_BYTES_WRITTEN'].tolist()
+
+        plt.figure(figsize=(12, 10))
+
+        # Scatter Plot for Read Operations
+        plt.subplot(2, 2, 1)
+        for i in range(len(jobs)):
+            plt.scatter(max_read_offset[i], bytes_read[i], marker='o', label=jobs[i])
+        plt.xlabel('Highest Read Offset (POSIX_MAX_BYTE_READ)')
+        plt.ylabel('Bytes Read (POSIX_BYTES_READ)')
+        plt.title('Highest Read Offset vs. Bytes Read')
+        plt.legend()
+
+        # Scatter Plot for Write Operations
+        plt.subplot(2, 2, 2)
+        for i in range(len(jobs)):
+            plt.scatter(max_write_offset[i], bytes_written[i], marker='o', label=jobs[i])
+        plt.xlabel('Highest Write Offset (POSIX_MAX_BYTE_WRITTEN)')
+        plt.ylabel('Bytes Written (POSIX_BYTES_WRITTEN)')
+        plt.title('Highest Write Offset vs. Bytes Written')
+        plt.legend()
+
+        # Histogram for Redundant Read Ratio
+        redundant_read_ratio = [bytes_read[i] / max_read_offset[i] for i in range(len(jobs))]
+        plt.subplot(2, 2, 3)
+        plt.hist(redundant_read_ratio, bins=10, color='blue', alpha=0.7)
+        plt.xlabel('Redundant Read Ratio')
+        plt.ylabel('Frequency')
+        plt.title('Distribution of Redundant Read Ratio')
+
+        # Histogram for Redundant Write Ratio
+        redundant_write_ratio = [bytes_written[i] / max_write_offset[i] for i in range(len(jobs))]
+        plt.subplot(2, 2, 4)
+        plt.hist(redundant_write_ratio, bins=10, color='red', alpha=0.7)
+        plt.xlabel('Redundant Write Ratio')
+        plt.ylabel('Frequency')
+        plt.title('Distribution of Redundant Write Ratio')
+
+        plt.tight_layout()
+        plt.savefig('graphredundant.png')
         # Redundant read-traffic (based on Phill)
         # POSIX_MAX_BYTE_READ (Highest offset in the file that was read)
         max_read_offset = df['counters']['POSIX_MAX_BYTE_READ'].max()
@@ -773,22 +901,39 @@ def main():
             issue = 'Application might have redundant read traffic (more data read than the highest offset)'
 
             insights_metadata.append(
-                message(INSIGHTS_POSIX_REDUNDANT_READ_USAGE, TARGET_DEVELOPER, WARN, issue, None)
-            )
+            {
+                'message': message(INSIGHTS_POSIX_REDUNDANT_READ_USAGE, TARGET_DEVELOPER, WARN, issue, None),
+                'graph': 'graphredundant.png'
+            }
+        )
+
 
         max_write_offset = df['counters']['POSIX_MAX_BYTE_WRITTEN'].max()
-
+        for item in recommendation:
+                graph_path = item.get('graph')
+                if graph_path:
+                    subprocess.run(['xdg=open', graph_path])
         if max_write_offset > total_written_size:
             issue = 'Application might have redundant write traffic (more data written than the highest offset)'
 
             insights_metadata.append(
-                message(INSIGHTS_POSIX_REDUNDANT_WRITE_USAGE, TARGET_DEVELOPER, WARN, issue, None)
-            )
-
+            {
+                'message' : message(INSIGHTS_POSIX_REDUNDANT_WRITE_USAGE, TARGET_DEVELOPER, WARN, issue, None),
+                'graph' : 'graphredundant.png'
+            }
+        )
+        for rec in recommendation:
+            graph_path = rec.get('graph')
+            if graph_path:
+                try:
+                    subprocess.run(['xdg-open', graph_path])
+                except FileNotFoundError:
+                    print(f"Warning: 'xdg-open' command not found. Please make sure 'xdg-utils' is installed to open the graph.")
+                except Exception as e:
+                    print(f"Error opening graph: {e}")
         #########################################################################################################################################################################
 
-        # Check for a lot of random operations
-
+ 
         read_consecutive = df['counters']['POSIX_CONSEC_READS'].sum()
         #print('READ Consecutive: {} ({:.2f}%)'.format(read_consecutive, read_consecutive / total_reads * 100))
 
@@ -798,6 +943,28 @@ def main():
 
         read_random = total_reads - read_consecutive - read_sequential
         #print('READ Random: {} ({:.2f}%)'.format(read_random, read_random / total_reads * 100))
+        total_reads = read_consecutive + read_sequential + read_random
+
+        # Calculate percentages
+        percent_consecutive = read_consecutive / total_reads * 100
+        percent_sequential = read_sequential / total_reads * 100
+        percent_random = read_random / total_reads * 100
+
+        # Plot the breakdown of read operations into consecutive, sequential, and random
+        plt.figure(figsize=(8, 6))
+        plt.bar("Read Operations", percent_random, color='red', label='Random')
+        plt.bar("Read Operations", percent_sequential, bottom=percent_random, color='orange', label='Sequential')
+        plt.bar("Read Operations", percent_consecutive, bottom=percent_random + percent_sequential, color='green', label='Consecutive')
+
+        plt.xlabel('Operations')
+        plt.ylabel('Percentage of Total Reads')
+        plt.title('Breakdown of Read Operations')
+        plt.legend(loc='upper right')
+
+        plt.ylim(0, 100)  # Set the y-axis limit from 0 to 100 for percentage representation
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        plt.savefig('graph4.png')
 
         if total_reads:
             if read_random and read_random / total_reads > THRESHOLD_RANDOM_OPERATIONS and read_random > THRESHOLD_RANDOM_OPERATIONS_ABSOLUTE:
@@ -807,7 +974,8 @@ def main():
 
                 recommendation = [
                     {
-                        'message': 'Consider changing your data model to have consecutive or sequential reads'
+                        'message': 'Consider changing your data model to have consecutive or sequential reads',
+                        'graph' : 'graph4.png'
                     }
                 ]
 
@@ -842,7 +1010,9 @@ def main():
 
                 recommendation = [
                     {
-                        'message': 'Consider changing your data model to have consecutive or sequential writes'
+                        'message': 'Consider changing your data model to have consecutive or sequential writes',
+                        'graph' : 'graph4.png'
+
                     }
                 ]
 
@@ -861,30 +1031,57 @@ def main():
 
         #########################################################################################################################################################################
 
-        # Shared file with small operations
-        # print(df['counters'].loc[(df['counters']['rank'] == -1)])
+    
+            # Shared file with small operations
+            # print(df['counters'].loc[(df['counters']['rank'] == -1)])
 
-        shared_files = df['counters'].loc[(df['counters']['rank'] == -1)]
+            shared_files = df['counters'].loc[(df['counters']['rank'] == -1)]
 
-        shared_files = shared_files.assign(id=lambda d: d['id'].astype(str))
+            shared_files = shared_files.assign(id=lambda d: d['id'].astype(str))
 
-        if not shared_files.empty:
-            total_shared_reads = shared_files['POSIX_READS'].sum()
-            total_shared_reads_small = (
-                shared_files['POSIX_SIZE_READ_0_100'].sum() +
-                shared_files['POSIX_SIZE_READ_100_1K'].sum() +
-                shared_files['POSIX_SIZE_READ_1K_10K'].sum() +
-                shared_files['POSIX_SIZE_READ_10K_100K'].sum() +
-                shared_files['POSIX_SIZE_READ_100K_1M'].sum()
-            )
+            if not shared_files.empty:
+                total_shared_reads = shared_files['POSIX_READS'].sum()
+                total_shared_reads_small = (
+                    shared_files['POSIX_SIZE_READ_0_100'].sum() +
+                    shared_files['POSIX_SIZE_READ_100_1K'].sum() +
+                    shared_files['POSIX_SIZE_READ_1K_10K'].sum() +
+                    shared_files['POSIX_SIZE_READ_10K_100K'].sum() +
+                    shared_files['POSIX_SIZE_READ_100K_1M'].sum()
+                )
 
-            shared_files['INSIGHTS_POSIX_SMALL_READS'] = (
-                shared_files['POSIX_SIZE_READ_0_100'] +
-                shared_files['POSIX_SIZE_READ_100_1K'] +
-                shared_files['POSIX_SIZE_READ_1K_10K'] +
-                shared_files['POSIX_SIZE_READ_10K_100K'] +
-                shared_files['POSIX_SIZE_READ_100K_1M']
-            )
+                shared_files['INSIGHTS_POSIX_SMALL_READS'] = (
+                    shared_files['POSIX_SIZE_READ_0_100'] +
+                    shared_files['POSIX_SIZE_READ_100_1K'] +
+                    shared_files['POSIX_SIZE_READ_1K_10K'] +
+                    shared_files['POSIX_SIZE_READ_10K_100K'] +
+                    shared_files['POSIX_SIZE_READ_100K_1M']
+                )
+
+    
+            # Create the KDE plot
+            plt.figure(figsize=(8, 6))
+            sns.kdeplot(data=total_shared_reads_small, color='blue', shade=True)
+
+            # Calculate x and y values for markers
+            x_values = [sum(total_shared_reads_small) / len(total_shared_reads_small)] * len(total_shared_reads_small)
+            y_values = [0] * len(total_shared_reads_small)
+
+            # Overlay a histogram on top of the KDE plot
+            sns.histplot(data=total_shared_reads_small, color='lightblue', bins=10, kde=False)
+
+            # Plot x and y value markers
+            for x, y, value in zip(x_values, y_values, total_shared_reads_small):
+                plt.text(x, y, str(value), ha='center', va='bottom', fontsize=10)
+
+            # Add x and y labels
+            plt.xlabel('Total Shared Reads (Small)')
+            plt.ylabel('Density')
+            plt.title('Kernel Density Estimation of Total Shared Reads (Small)')
+
+            plt.tight_layout()
+            plt.savefig('graph5.png')
+
+
 
             if total_shared_reads and total_shared_reads_small / total_shared_reads > THRESHOLD_SMALL_REQUESTS and total_shared_reads_small > THRESHOLD_SMALL_REQUESTS_ABSOLUTE:
                 issue = 'Application issues a high number ({}) of small read requests to a shared file (i.e., < 1MB) which represents {:.2f}% of all shared file read requests'.format(
@@ -908,7 +1105,8 @@ def main():
                 recommendation = [
                     {
                         'message': 'Consider coalesceing read requests into larger more contiguous ones using MPI-IO collective operations',
-                        'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/mpi-io-collective-read.c'), line_numbers=True, background_color='default')
+                        'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/mpi-io-collective-read.c'), line_numbers=True, background_color='default'),
+                        'graph' : 'graph5.png'
                     }
                 ]
 
@@ -933,6 +1131,28 @@ def main():
                 shared_files['POSIX_SIZE_WRITE_100K_1M']
             )
 
+            # Create the KDE plot
+            plt.figure(figsize=(8, 6))
+            sns.kdeplot(data=total_shared_writes_small, color='blue', shade=True)
+
+            # Calculate x and y values for markers
+            x_values = [sum(total_shared_writes_small) / len(total_shared_writes_small)] * len(total_shared_writes_small)
+            y_values = [0] * len(total_shared_writes_small)
+
+            # Overlay a histogram on top of the KDE plot
+            sns.histplot(data=total_shared_writes_small, color='lightblue', bins=10, kde=False)
+
+            # Plot x and y value markers
+            for x, y, value in zip(x_values, y_values, total_shared_reads_small):
+                plt.text(x, y, str(value), ha='center', va='bottom', fontsize=10)
+
+            # Add x and y labels
+            plt.xlabel('Total Shared Writes (Small)')
+            plt.ylabel('Density')
+            plt.title('Kernel Density Estimation of Total Shared Writes (Small)')
+
+            plt.tight_layout()
+            plt.savefig('graph55.png')
             if total_shared_writes and total_shared_writes_small / total_shared_writes > THRESHOLD_SMALL_REQUESTS and total_shared_writes_small > THRESHOLD_SMALL_REQUESTS_ABSOLUTE:
                 issue = 'Application issues a high number ({}) of small write requests to a shared file (i.e., < 1MB) which represents {:.2f}% of all shared file write requests'.format(
                     total_shared_writes_small, total_shared_writes_small / total_shared_writes * 100.0
@@ -948,14 +1168,17 @@ def main():
                                     row['INSIGHTS_POSIX_SMALL_WRITES'],
                                     row['INSIGHTS_POSIX_SMALL_WRITES'] / total_shared_writes * 100.0,
                                     file_map[int(row['id'])] if args.full_path else os.path.basename(file_map[int(row['id'])])
-                                ) 
+                                ),
+                                'graph' : 'graph55.png'
                             }
                         )
 
                 recommendation = [
                     {
                         'message': 'Consider coalescing write requests into larger more contiguous ones using MPI-IO collective operations',
-                        'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/mpi-io-collective-write.c'), line_numbers=True, background_color='default')
+                        'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/mpi-io-collective-write.c'), line_numbers=True, background_color='default'),
+                        'graph' : 'graph55.png'
+
                     }
                 ]
 
@@ -965,6 +1188,27 @@ def main():
 
         #########################################################################################################################################################################
 
+        
+        has_long_metadata = df['fcounters'][(df['fcounters']['POSIX_F_META_TIME'] > THRESHOLD_METADATA_TIME_RANK)]
+
+
+        # Create the grouped bar chart
+        metrics = ['Number of Ranks with Long Metadata']
+        values = [has_long_metadata]
+
+        plt.figure(figsize=(6, 6))
+        plt.bar(metrics, values, color='b')
+        plt.xlabel('Metrics')
+        plt.ylabel('Counts')
+        plt.title('Number of Ranks with Long Metadata Operations')
+        plt.ylim(0, max(values) * 1.2)  # Set the y-axis limit with some buffer space
+
+        # Add annotations with specific Darshan counter information
+        plt.annotate('Threshold: {} seconds'.format(THRESHOLD_METADATA_TIME_RANK), xy=(0, has_long_metadata), xytext=(0.5, has_long_metadata_ranks + 0.2),
+                    arrowprops=dict(arrowstyle='->'), ha='center')
+
+        plt.tight_layout()
+        plt.savefig('graph6.png')
         has_long_metadata = df['fcounters'][(df['fcounters']['POSIX_F_META_TIME'] > THRESHOLD_METADATA_TIME_RANK)]
 
         if not has_long_metadata.empty:
@@ -974,7 +1218,8 @@ def main():
 
             recommendation = [
                 {
-                    'message': 'Attempt to combine files, reduce, or cache metadata operations'
+                    'message': 'Attempt to combine files, reduce, or cache metadata operations',
+                    'graph' : 'graph6.png'
                 }
             ]
 
@@ -982,11 +1227,15 @@ def main():
                 recommendation.append(
                     {
                         'message': 'Since your appplication uses HDF5, try enabling collective metadata calls with H5Pset_coll_metadata_write() and H5Pset_all_coll_metadata_ops()',
-                        'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/hdf5-collective-metadata.c'), line_numbers=True, background_color='default')
+                        'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/hdf5-collective-metadata.c'), line_numbers=True, background_color='default'),
+                        'graph' : 'graph6.png'
+
                     },
                     {
                         'message': 'Since your appplication uses HDF5, try using metadata cache to defer metadata operations',
-                        'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/hdf5-cache.c'), line_numbers=True, background_color='default')
+                        'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/hdf5-cache.c'), line_numbers=True, background_color='default'),
+                        'graph' : 'graph6.png'
+
                     }
                 )
 
@@ -1000,7 +1249,30 @@ def main():
         # POSIX_FASTEST_RANK_BYTES
         # POSIX_SLOWEST_RANK_BYTES
         # POSIX_F_VARIANCE_RANK_BYTES
+# Hypothetical data (replace with actual Darshan counter data)
+        shared_files = pd.DataFrame({
+            'rank': df['counters']['rank'].tolist(),
+            'POSIX_BYTES_WRITTEN': df['counters']['POSIX_BYTES_WRITTEN'].tolist(),
+            'POSIX_BYTES_READ': df['counters']['POSIX_BYTES_READ'].tolist(),
+            'POSIX_FASTEST_RANK_BYTES': df['counters']['POSIX_FASTEST_RANK_BYTES'].tolist(),
+            'POSIX_SLOWEST_RANK_BYTES': df['counters']['POSIX_SLOWEST_RANK_BYTES'].tolist()
+        })
 
+        # Calculate total transfer size for each shared file access
+        shared_files['TOTAL_TRANSFER_SIZE'] = shared_files['POSIX_BYTES_WRITTEN'] + shared_files['POSIX_BYTES_READ']
+
+        # Calculate the load imbalance percentage for each shared file access
+        shared_files['LOAD_IMBALANCE'] = abs(shared_files['POSIX_SLOWEST_RANK_BYTES'] - shared_files['POSIX_FASTEST_RANK_BYTES']) / shared_files['TOTAL_TRANSFER_SIZE']
+
+        # Create a heatmap to visualize the load imbalance for each shared file access
+        plt.figure(figsize=(10, 6))
+        heatmap_data = shared_files.pivot('id', 'TOTAL_TRANSFER_SIZE', 'LOAD_IMBALANCE')
+        sns.heatmap(heatmap_data, cmap='coolwarm', annot=True, fmt=".2f", cbar_kws={'label': 'Load Imbalance Percentage'})
+        plt.title('Load Imbalance caused by Stragglers for Shared File Accesses')
+        plt.xlabel('Total Transfer Size')
+        plt.ylabel('Shared File ID')
+        plt.tight_layout()
+        plt.savefig('graph7.png')
         stragglers_count = 0
 
         shared_files = shared_files.assign(id=lambda d: d['id'].astype(str))
@@ -1031,17 +1303,20 @@ def main():
                         'message': 'Load imbalance of {:.2f}% detected while accessing "{}"'.format(
                             file[1],
                             file_map[int(file[0])] if args.full_path else os.path.basename(file_map[int(file[0])])
-                        ) 
+                        ),
+                        'graph' : 'graph7.png'
                     }
                 )
 
             recommendation = [
                 {
-                    'message': 'Consider better balancing the data transfer between the application ranks'
+                    'message': 'Consider better balancing the data transfer between the application ranks',
+                    'graph' : 'graph7.png'
                 },
                 {
                     'message': 'Consider tuning how your data is distributed in the file system by changing the stripe size and count',
-                    'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/lustre-striping.bash'), line_numbers=True, background_color='default')
+                    'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/lustre-striping.bash'), line_numbers=True, background_color='default'),
+                    'graph' : 'graph7.png'
                 }
             ]
 
@@ -1053,6 +1328,33 @@ def main():
         # POSIX_F_SLOWEST_RANK_TIME
         # POSIX_F_VARIANCE_RANK_TIME
 
+
+        # Hypothetical data (replace with actual Darshan counter data)
+        shared_files_times = pd.DataFrame({
+            'id': df['counters']['jobid'].tolist(),
+            'POSIX_F_WRITE_TIME': df['counters']['POSIX_F_WRITE_TIME'].tolist(),
+            'POSIX_F_READ_TIME': df['counters']['POSIX_F_READ_TIME'].tolist(),
+            'POSIX_F_META_TIME': df['counters']['POSIX_F_META_TIME'].tolist(),
+            'POSIX_F_FASTEST_RANK_TIME': df['counters']['POSIX_F_FASTEST_RANK_TIME'].tolist(),
+            'POSIX_F_SLOWEST_RANK_TIME': df['counters']['POSIX_F_SLOWEST_RANK_TIME'].tolist()
+        })
+
+
+        # Calculate total transfer time for each shared file access
+        shared_files_times['TOTAL_TRANSFER_TIME'] = shared_files_times['POSIX_F_WRITE_TIME'] + shared_files_times['POSIX_F_READ_TIME'] + shared_files_times['POSIX_F_META_TIME']
+
+        # Calculate the time imbalance percentage for each shared file access
+        shared_files_times['TIME_IMBALANCE'] = abs(shared_files_times['POSIX_F_SLOWEST_RANK_TIME'] - shared_files_times['POSIX_F_FASTEST_RANK_TIME']) / shared_files_times['TOTAL_TRANSFER_TIME']
+
+        # Create a heatmap to visualize the time imbalance for each shared file access
+        plt.figure(figsize=(10, 6))
+        heatmap_data = shared_files_times.pivot('id', 'TOTAL_TRANSFER_TIME', 'TIME_IMBALANCE')
+        sns.heatmap(heatmap_data, cmap='coolwarm', annot=True, fmt=".2f", cbar_kws={'label': 'Time Imbalance Percentage'})
+        plt.title('Time Imbalance caused by Stragglers for Shared File Accesses')
+        plt.xlabel('Total Transfer Time')
+        plt.ylabel('Shared File ID')
+        plt.tight_layout()
+        plt.savefig('graph8.png')
         shared_files_times = df['fcounters'].loc[(df['fcounters']['rank'] == -1)]
 
         # Get the files responsible
@@ -1086,17 +1388,20 @@ def main():
                         'message': 'Load imbalance of {:.2f}% detected while accessing "{}"'.format(
                             file[1],
                             file_map[int(file[0])] if args.full_path else os.path.basename(file_map[int(file[0])])
-                        ) 
+                        ),
+                        'graph' : 'graph8.png'
                     }
                 )
 
             recommendation = [
                 {
-                    'message': 'Consider better distributing the data in the parallel file system' # needs to review what suggestion to give
+                    'message': 'Consider better distributing the data in the parallel file system',
+                    'graph' : 'graph8.png' # needs to review what suggestion to give
                 },
                 {
                     'message': 'Consider tuning how your data is distributed in the file system by changing the stripe size and count',
-                    'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/lustre-striping.bash'), line_numbers=True, background_color='default')
+                    'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/lustre-striping.bash'), line_numbers=True, background_color='default'),
+                    'graph' : 'graph8.png'
                 }
             ]
 
@@ -1115,7 +1420,29 @@ def main():
         aggregated.columns = list(map('_'.join, aggregated.columns.values))
 
         aggregated = aggregated.assign(id=lambda d: d['id_'].astype(str))
+        shared_files_times = pd.DataFrame({
+            'id': df['counters']['jobid'].tolist(),
+            'POSIX_F_WRITE_TIME': df['counters']['POSIX_F_WRITE_TIME'].tolist(),
+            'POSIX_F_READ_TIME': df['counters']['POSIX_F_READ_TIME'].tolist(),
+            'POSIX_F_META_TIME': df['counters']['POSIX_F_META_TIME'].tolist(),
+            'POSIX_F_FASTEST_RANK_TIME': df['counters']['POSIX_F_FASTEST_RANK_TIME'].tolist(),
+            'POSIX_F_SLOWEST_RANK_TIME': df['counters']['POSIX_F_SLOWEST_RANK_TIME'].tolist(),
+        })
+        # Calculate total transfer time for each shared file access
+        shared_files_times['TOTAL_TRANSFER_TIME'] = shared_files_times['POSIX_F_WRITE_TIME'] + shared_files_times['POSIX_F_READ_TIME'] + shared_files_times['POSIX_F_META_TIME']
 
+        # Calculate the time imbalance percentage for each shared file access
+        shared_files_times['TIME_IMBALANCE'] = abs(shared_files_times['POSIX_F_SLOWEST_RANK_TIME'] - shared_files_times['POSIX_F_FASTEST_RANK_TIME']) / shared_files_times['TOTAL_TRANSFER_TIME']
+
+        # Create a heatmap to visualize the time imbalance for each shared file access
+        plt.figure(figsize=(10, 6))
+        heatmap_data = shared_files_times.pivot('id', 'TOTAL_TRANSFER_TIME', 'TIME_IMBALANCE')
+        sns.heatmap(heatmap_data, cmap='coolwarm', annot=True, fmt=".2f", cbar_kws={'label': 'Time Imbalance Percentage'})
+        plt.title('Time Imbalance caused by Stragglers for Shared File Accesses')
+        plt.xlabel('Total Transfer Time')
+        plt.ylabel('Shared File ID')
+        plt.tight_layout()
+        plt.savefig('graph9.png')
         # Get the files responsible
         imbalance_count = 0
 
@@ -1142,24 +1469,29 @@ def main():
                         'message': 'Load imbalance of {:.2f}% detected while accessing "{}"'.format(
                             file[1],
                             file_map[int(file[0])] if args.full_path else os.path.basename(file_map[int(file[0])])
-                        ) 
+                        ),
+                        'graph' : 'graph9.png'
                     }
                 )
 
             recommendation = [
                 {
-                    'message': 'Consider better balancing the data transfer between the application ranks'
+                    'message': 'Consider better balancing the data transfer between the application ranks',
+                    'graph' : 'graph9.png'
                 },
                 {
                     'message': 'Consider tuning the stripe size and count to better distribute the data',
-                    'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/lustre-striping.bash'), line_numbers=True, background_color='default')
+                    'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/lustre-striping.bash'), line_numbers=True, background_color='default'),
+                    'graph' : 'graph9.png'
                 },
                 {
                     'message': 'If the application uses netCDF and HDF5 double-check the need to set NO_FILL values',
-                    'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/pnetcdf-hdf5-no-fill.c'), line_numbers=True, background_color='default')
+                    'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/pnetcdf-hdf5-no-fill.c'), line_numbers=True, background_color='default'),
+                    'graph' : 'graph9.png'
                 },
                 {
-                    'message': 'If rank 0 is the only one opening the file, consider using MPI-IO collectives'
+                    'message': 'If rank 0 is the only one opening the file, consider using MPI-IO collectives',
+                    'graph' : 'graph9.png'
                 }
             ]
 
@@ -1192,24 +1524,30 @@ def main():
                         'message': 'Load imbalance of {:.2f}% detected while accessing "{}"'.format(
                             file[1],
                             file_map[int(file[0])] if args.full_path else os.path.basename(file_map[int(file[0])])
-                        ) 
+                        ),
+                        'graph' : 'graph9.png'
                     }
                 )
 
             recommendation = [
                 {
-                    'message': 'Consider better balancing the data transfer between the application ranks'
+                    'message': 'Consider better balancing the data transfer between the application ranks',
+                    'graph' : 'graph9.png'
+
                 },
                 {
                     'message': 'Consider tuning the stripe size and count to better distribute the data',
-                    'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/lustre-striping.bash'), line_numbers=True, background_color='default')
+                    'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/lustre-striping.bash'), line_numbers=True, background_color='default'),
+                    'graph' : 'graph9.png'
                 },
                 {
                     'message': 'If the application uses netCDF and HDF5 double-check the need to set NO_FILL values',
-                    'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/pnetcdf-hdf5-no-fill.c'), line_numbers=True, background_color='default')
+                    'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/pnetcdf-hdf5-no-fill.c'), line_numbers=True, background_color='default'),
+                    'graph' : 'graph9.png'
                 },
                 {
-                    'message': 'If rank 0 is the only one opening the file, consider using MPI-IO collectives'
+                    'message': 'If rank 0 is the only one opening the file, consider using MPI-IO collectives',
+                    'graph' : 'graph9.png'
                 }
             ]
 
@@ -1219,6 +1557,48 @@ def main():
 
     #########################################################################################################################################################################
 
+        # Hypothetical data (replace with actual data from the code snippet)
+        # Calculate the percentage of collective read operations
+        total_indep_reads = df_mpiio['counters']['MPIIO_INDEP_READS'].sum()
+        total_coll_reads = df_mpiio['counters']['MPIIO_COLL_READS'].sum()
+        total_reads = total_indep_reads + total_coll_reads
+
+        # Calculate the percentage of collective read operations
+        percentage_coll_reads = (total_coll_reads / total_reads) * 100
+
+        # Plot the bar chart
+        plt.figure(figsize=(8, 6))
+        plt.bar(['Collective Reads', 'Independent Reads'], [percentage_coll_reads, 100 - percentage_coll_reads], color=['blue', 'orange'])
+        plt.xlabel('Read Operations')
+        plt.ylabel('Percentage')
+        plt.title('Percentage of Collective Reads vs. Independent Reads')
+        plt.ylim(0, 100)
+        plt.xticks(rotation=45, ha='right')
+        plt.tight_layout()
+        plt.savefig('graph10.png')
+        
+        # Assuming df_mpiio['counters']['MPIIO_COLL_READS'].sum() and df_mpiio['counters']['MPIIO_INDEP_READS'].sum() are already defined
+
+        # Total MPI-IO read operations
+        total_mpiio_read_operations = df_mpiio['counters']['MPIIO_COLL_READS'].sum() + df_mpiio['counters']['MPIIO_INDEP_READS'].sum()
+
+        # Count of collective read operations
+        collective_reads = df_mpiio['counters']['MPIIO_COLL_READS'].sum()
+
+        # Count of independent read operations
+        independent_reads = df_mpiio['counters']['MPIIO_INDEP_READS'].sum()
+
+        # Create labels and sizes for the pie chart
+        labels = ['Collective Reads', 'Independent Reads']
+        sizes = [collective_reads, independent_reads]
+
+        # Plotting the pie chart
+        plt.figure(figsize=(6, 6))
+        plt.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90, colors=['lightskyblue', 'lightcoral'])
+
+        plt.title('MPI-IO Read Operations')
+        plt.axis('equal')
+        plt.savefig('graph13.png')
     if 'MPI-IO' in report.records:
         # Check if application uses MPI-IO and collective operations
         df_mpiio = report.records['MPI-IO'].to_df()
@@ -1226,6 +1606,7 @@ def main():
         df_mpiio['counters'] = df_mpiio['counters'].assign(id=lambda d: d['id'].astype(str))
 
         #print(df_mpiio)
+
 
         # Get the files responsible
         detected_files = []
@@ -1253,14 +1634,16 @@ def main():
                                     row['MPIIO_INDEP_READS'],
                                     row['MPIIO_INDEP_READS'] / (row['MPIIO_INDEP_READS'] + row['MPIIO_INDEP_WRITES']) * 100,
                                     file_map[int(row['id'])] if args.full_path else os.path.basename(file_map[int(row['id'])])
-                                ) 
+                                ),
+                                'graph' : 'graph13.png'
                             }
                         )
 
                 recommendation = [
                     {
                         'message': 'Use collective read operations (e.g. MPI_File_read_all() or MPI_File_read_at_all()) and set one aggregator per compute node',
-                        'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/mpi-io-collective-read.c'), line_numbers=True, background_color='default')
+                        'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/mpi-io-collective-read.c'), line_numbers=True, background_color='default'),
+                        'graph' : 'graph13.png'
                     }
                 ]
 
@@ -1300,14 +1683,16 @@ def main():
                                     row['MPIIO_INDEP_WRITES'],
                                     row['MPIIO_INDEP_WRITES'] / (row['MPIIO_INDEP_READS'] + row['MPIIO_INDEP_WRITES']) * 100,
                                     file_map[int(row['id'])] if args.full_path else os.path.basename(file_map[int(row['id'])])
-                                ) 
+                                ),
+                                'graph' : 'graph13.png'
                             }
                         )
 
                 recommendation = [
                     {
                         'message': 'Use collective write operations (e.g. MPI_File_write_all() or MPI_File_write_at_all()) and set one aggregator per compute node',
-                        'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/mpi-io-collective-write.c'), line_numbers=True, background_color='default')
+                        'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/mpi-io-collective-write.c'), line_numbers=True, background_color='default'),
+                        'graph' : 'graph13.png'
                     }
                 ]
 
@@ -1325,7 +1710,29 @@ def main():
             )
 
         #########################################################################################################################################################################
+        # Total MPI-IO read operations (blocking + non-blocking)
+        total_mpiio_reads = df_mpiio['counters']['MPIIO_NB_READS'].sum() + df_mpiio['counters']['MPIIO_IND_READS'].sum()
 
+        # Total MPI-IO write operations (blocking + non-blocking)
+        total_mpiio_writes = df_mpiio['counters']['MPIIO_NB_WRITES'].sum() + df_mpiio['counters']['MPIIO_IND_WRITES'].sum()
+
+        # Percentage of non-blocking reads and blocking reads
+        percentage_nb_reads = df_mpiio['counters']['MPIIO_NB_READS'].sum() / total_mpiio_reads * 100
+
+        # Percentage of non-blocking writes and blocking writes
+        percentage_nb_writes = df_mpiio['counters']['MPIIO_NB_WRITES'].sum() / total_mpiio_writes * 100
+
+        # Plotting the graph
+        labels = ['Blocking Reads', 'Non-blocking (Async) Reads', 'Blocking Writes', 'Non-blocking (Async) Writes']
+        values = [total_mpiio_reads - df_mpiio['counters']['MPIIO_NB_READS'].sum(), df_mpiio['counters']['MPIIO_NB_READS'].sum(),
+                total_mpiio_writes - df_mpiio['counters']['MPIIO_NB_WRITES'].sum(), df_mpiio['counters']['MPIIO_NB_WRITES'].sum()]
+        colors = ['lightcoral', 'lightskyblue', 'lightcoral', 'lightskyblue']
+
+        plt.figure(figsize=(10, 6))
+        plt.pie(values, labels=labels, colors=colors, autopct='%.1f%%', startangle=140)
+        plt.title('MPI-IO Read and Write Operations - Blocking vs. Non-blocking (Async)')
+        plt.axis('equal')
+        plt.savefig('graph11.png')
         # Look for usage of non-block operations
 
         # Look for HDF5 file extension
@@ -1345,7 +1752,8 @@ def main():
                 recommendation.append(
                     {
                         'message': 'Since you use HDF5, consider using the ASYNC I/O VOL connector (https://github.com/hpc-io/vol-async)',
-                        'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/hdf5-vol-async-read.c'), line_numbers=True, background_color='default')
+                        'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/hdf5-vol-async-read.c'), line_numbers=True, background_color='default'),
+                        'graph' : 'graph11.png'
                     }
                 )
 
@@ -1353,7 +1761,8 @@ def main():
                 recommendation.append(
                     {
                         'message': 'Since you use MPI-IO, consider non-blocking/asynchronous I/O operations', # (e.g., MPI_File_iread(), MPI_File_read_all_begin/end(), or MPI_File_read_at_all_begin/end())',
-                        'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/mpi-io-iread.c'), line_numbers=True, background_color='default')
+                        'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/mpi-io-iread.c'), line_numbers=True, background_color='default'),
+                        'graph' : 'graph11.png'
                     }
                 )
 
@@ -1370,7 +1779,8 @@ def main():
                 recommendation.append(
                     {
                         'message': 'Since you use HDF5, consider using the ASYNC I/O VOL connector (https://github.com/hpc-io/vol-async)',
-                        'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/hdf5-vol-async-write.c'), line_numbers=True, background_color='default')
+                        'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/hdf5-vol-async-write.c'), line_numbers=True, background_color='default'),
+                        'graph' : 'graph11.png'
                     }
                 )
 
@@ -1378,7 +1788,8 @@ def main():
                 recommendation.append(
                     {
                         'message': 'Since you use MPI-IO, consider non-blocking/asynchronous I/O operations',  # (e.g., MPI_File_iwrite(), MPI_File_write_all_begin/end(), or MPI_File_write_at_all_begin/end())',
-                        'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/mpi-io-iwrite.c'), line_numbers=True, background_color='default')
+                        'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/mpi-io-iwrite.c'), line_numbers=True, background_color='default'),
+                        'graph' : 'graph11.png'
                     }
                 )
 
@@ -1388,6 +1799,20 @@ def main():
 
     #########################################################################################################################################################################
 
+    # Assuming cb_nodes and NUMBER_OF_COMPUTE_NODES are already defined correctly
+
+    # Number of compute nodes
+    x = ['Number of Aggregators', 'Number of Compute Nodes']
+    values = [cb_nodes, NUMBER_OF_COMPUTE_NODES]
+
+    # Plotting the graph
+    plt.figure(figsize=(8, 6))
+    plt.bar(x, values, color=['lightcoral', 'lightskyblue'])
+
+    plt.xlabel('Status')
+    plt.ylabel('Count')
+    plt.title('MPI-IO Aggregators per Compute Node')
+    plt.savefig('graph12.png')
     # Nodes and MPI-IO aggregators
     # If the application uses collective reads or collective writes, look for the number of aggregators
     hints = ''
@@ -1408,8 +1833,7 @@ def main():
         cb_nodes = None
 
         for hint in hints:
-            if hint != 'no':
-                (key, value) = hint.split('=')
+            (key, value) = hint.split('=')
             
             if key == 'cb_nodes':
                 cb_nodes = value
@@ -1443,7 +1867,8 @@ def main():
                                     'message': 'Set the MPI hints for the number of aggregators as one per compute node (e.g., cb_nodes={})'.format(
                                         NUMBER_OF_COMPUTE_NODES
                                     ),
-                                    'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/mpi-io-hints.bash'), line_numbers=True, background_color='default')
+                                    'sample': Syntax.from_path(os.path.join(ROOT, 'snippets/mpi-io-hints.bash'), line_numbers=True, background_color='default'),
+                                    'graph' : 'graph12.png'
                                 }
                             ]
 
