@@ -1744,7 +1744,7 @@ def main():
                 has_hdf5_extension = True
 
         if df_mpiio['counters']['MPIIO_NB_READS'].sum() == 0:
-            issue = 'Application could benefit from non-blocking (asynchronous) reads'
+            issue = 'Application could benefit from DYINGGGGG non-blocking (asynchronous) reads'
 
             recommendation = []
 
