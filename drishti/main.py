@@ -804,7 +804,7 @@ def main():
             )
 
         if total_operations and total_file_not_aligned / total_operations > THRESHOLD_MISALIGNED_REQUESTS:
-            issue = 'Application issues a high number ({:.2f}%) of misaligned file requests'.format(
+            issue = 'Application issues a high number ({:.2f}%) of misaligned file die dieDIE DIE DIE requests'.format(
                 total_file_not_aligned / total_operations * 100.0
             )
 
